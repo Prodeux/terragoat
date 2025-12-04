@@ -1,0 +1,44 @@
+name: Trivy IaC Scan
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  trivy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Trivy on Terraform AWS
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'config'
+          scan-ref: './terraform/aws'
+          scanners: 'misconfig'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'LOW,MEDIUM,HIGH,CRITICAL'
+          exit-code: '0'
+          hide-progress: true
+
+      - name: Normalize SARIF paths
+        run: |
+          jq '.runs[].results[].locations[].physicalLocation.artifactLocation.uri |=
+                (sub("^/github/workspace/"; "") |
+                 (if startswith("http:") or startswith("https:") or startswith("file:")
+                  then .
+                  elif startswith("terraform/aws/")
+                  then .
+                  else "terraform/aws/" + .
+                  end))' \
+             trivy-results.sarif > trivy-fixed.sarif
+          mv trivy-fixed.sarif trivy-results.sarif
+
+      - name: Upload Trivy SARIF results
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
